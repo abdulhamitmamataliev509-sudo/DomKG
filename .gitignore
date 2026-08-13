@@ -1,0 +1,56 @@
+# ---- Python / Flask ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+*.egg
+
+# ---- Virtual environment (backend) ----
+backend/venv/
+backend/.venv/
+
+# ---- Flask / runtime ----
+backend/instance/
+backend/uploads/*
+!backend/uploads/.gitkeep
+.flaskenv
+.env
+*.log
+*.sqlite
+*.sqlite3
+
+# ---- Testing ----
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Frontend ----
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Docs build artifacts ----
+docs/_build/
