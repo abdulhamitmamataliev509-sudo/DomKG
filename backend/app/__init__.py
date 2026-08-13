@@ -1,5 +1,6 @@
 import os
 from flask import Flask, jsonify
+from flask_cors import CORS
 from sqlalchemy import text
 from config import config_by_name
 from app.extensions import db, migrate
@@ -9,6 +10,7 @@ def create_app(config_name=None):
         config_name = os.getenv('FLASK_ENV', 'development')
 
     app = Flask(__name__)
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config.from_object(config_by_name.get(config_name, config_by_name['dev']))
 
     # Initialize extensions
