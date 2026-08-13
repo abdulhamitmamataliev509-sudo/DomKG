@@ -22,6 +22,10 @@ def create_app(config_name=None):
         # Модель-индекстер даярдалсын
         db.configure_mappers()
 
+    # API blueprint'терин каттоо (/api/*)
+    from app.api import register_blueprints
+    register_blueprints(app)
+
     # Health & DB Test Endpoint
     @app.route("/")
     def index():
