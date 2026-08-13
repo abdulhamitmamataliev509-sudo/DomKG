@@ -15,6 +15,13 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Бардык моделдерди каттоо (db.create_all / alembic көрүшү үчүн)
+    with app.app_context():
+        from app import models  # noqa: F401
+
+        # Модель-индекстер даярдалсын
+        db.configure_mappers()
+
     # Health & DB Test Endpoint
     @app.route("/")
     def index():
