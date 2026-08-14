@@ -1,14 +1,26 @@
 """Колдонуучулар Blueprint'и — /api/users."""
 from flask import Blueprint, request
 
+from app.decorators import get_optional_active_user, is_admin
 from app.models import User
 from app.utils.http import error, iso, success
 
 users_bp = Blueprint("users", __name__, url_prefix="/users")
 
 
-def _user_dict(user):
-    """User моделинин ачык көрүнүшү."""
+def _public_user_dict(user):
+    """Ачык (публичный) көрүнүш — PII жок (email/phone эмес)."""
+    return {
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "avatar_url": user.avatar_url,
+        "created_at": iso(user.created_at),
+    }
+
+
+def _private_user_dict(user):
+    """Жеке көрүнүш — ээсине же админге гана."""
     return {
         "id": user.id,
         "email": user.email,
@@ -122,7 +134,7 @@ def list_users():
         return error("limit/offset сан болушу керек", 400)
 
     users = User.query.filter_by(is_active=True).limit(limit).offset(offset).all()
-    return success([_user_dict(u) for u in users])
+    return success([_public_user_dict(u) for u in users])
 
 
 @users_bp.get("/<int:user_id>")
@@ -178,4 +190,8 @@ def get_user(user_id):
     user = User.query.get(user_id)
     if not user:
         return error("Колдонуучу табылган жок", 404)
-    return success(_user_dict(user))
+
+    current = get_optional_active_user()
+    if current and (current.id == user.id or is_admin(current)):
+        return success(_private_user_dict(user))
+    return success(_public_user_dict(user))

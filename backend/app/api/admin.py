@@ -4,8 +4,9 @@
 """
 from datetime import datetime, timezone
 
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 
+from app.decorators import admin_required
 from app.extensions import db
 from app.models import Property, Report, User, View
 from app.utils.http import error, iso, success
@@ -48,6 +49,7 @@ def admin_ping():
 
 
 @admin_bp.get("/stats")
+@admin_required
 def stats():
     """
     Платформанын жалпы статистикасы.
@@ -106,6 +108,7 @@ def stats():
 
 
 @admin_bp.get("/reports")
+@admin_required
 def list_reports():
     """
     Арыздардын тизмеси.
@@ -180,16 +183,19 @@ def list_reports():
 
 
 @admin_bp.patch("/reports/<int:report_id>")
+@admin_required
 def resolve_report(report_id):
     """
-    Арызды чечүү.
+    Арызды чечүү (админ гана).
 
-    `resolved_by` (админ ID), `status` (resolved/dismissed) жана
-    `resolution_note` кабыл алынат.
+    `status` (resolved/dismissed) жана `resolution_note` кабыл алынат;
+    чечүүчү админ сессиядан (JWT) аныкталат.
     ---
     tags:
       - admin
     summary: Арызды чечүү/жабуу
+    security:
+      - Bearer: []
     parameters:
       - name: report_id
         in: path
@@ -201,12 +207,7 @@ def resolve_report(report_id):
         required: true
         schema:
           type: object
-          required:
-            - resolved_by
           properties:
-            resolved_by:
-              type: integer
-              description: Админ колдонуучунун ID
             status:
               type: string
               enum: [resolved, dismissed]
@@ -216,60 +217,28 @@ def resolve_report(report_id):
     responses:
       200:
         description: Арыз чечилди
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-            data:
-              type: object
-              properties:
-                id:
-                  type: integer
-                status:
-                  type: string
-      400:
-        description: Валидация катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
+      401:
+        description: Аутентификация талап
+      403:
+        description: Админ укугу жок
       404:
         description: Арыз табылган жок
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-      500:
-        description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
     """
     report = Report.query.get(report_id)
     if not report:
         return error("Арыз табылган жок", 404)
 
     data = request.get_json(silent=True) or {}
-    admin_id = data.get("resolved_by")
-    if not admin_id:
-        return error("resolved_by талап кылынат", 400)
 
     status = data.get("status", "resolved")
     if status not in ("resolved", "dismissed"):
         return error("status 'resolved' же 'dismissed' болушу керек", 400)
 
-    report.resolve(admin_id, status=status, note=data.get("resolution_note"))
+    report.resolve(
+        g.current_admin.id,
+        status=status,
+        note=data.get("resolution_note"),
+    )
     db.session.commit()
     return success(
         {"id": report.id, "status": report.status},

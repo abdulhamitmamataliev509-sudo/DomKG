@@ -2,7 +2,7 @@
 
 Катталуу, кирүү, токен жаңылоо жана учурдагы колдонуучу операциялары.
 """
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -10,6 +10,8 @@ from flask_jwt_extended import (
     jwt_required,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.decorators import active_jwt_required
 
 from app.extensions import db
 from app.models import User
@@ -164,6 +166,10 @@ def login():
     user = User.query.filter_by(email=email).first()
     if not user or not check_password_hash(user.password_hash, password):
         return error("Email же пароль туура эмес", 401)
+    # Деактивацияланган аккаунт кире албайт (колдонуучуну санашоо кылбаш үчүн
+    # ошол эле жалпы 401-сообщение кайтарылат).
+    if not user.is_active:
+        return error("Email же пароль туура эмес", 401)
 
     access_token = create_access_token(identity=str(user.id))
     refresh_token = create_refresh_token(identity=str(user.id))
@@ -195,12 +201,15 @@ def refresh():
         description: Refresh токен туура эмес же мөөнөтү өткөн
     """
     user_id = get_jwt_identity()
-    new_access_token = create_access_token(identity=str(user_id))
+    user = db.session.get(User, int(user_id)) if user_id else None
+    if user is None or not user.is_active:
+        return error("Аккаунт өчүрүлгөн же табылган жок", 401)
+    new_access_token = create_access_token(identity=str(user.id))
     return success({"access_token": new_access_token}, message="Токен жаңыланды")
 
 
 @auth_bp.get("/me")
-@jwt_required()
+@active_jwt_required
 def me():
     """
     Учурдагы колдонуучунун профили.
@@ -214,12 +223,6 @@ def me():
       200:
         description: Учурдагы колдонуучунун маалыматы
       401:
-        description: Токен жетпейт же жараксыз
-      404:
-        description: Колдонуучу табылган жок
+        description: Токен жетпейт же аккаунт өчүрүлгөн
     """
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    if not user:
-        return error("Колдонуучу табылган жок", 404)
-    return success(_user_dict(user))
+    return success(_user_dict(g.current_user))

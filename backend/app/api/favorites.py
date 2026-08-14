@@ -1,8 +1,9 @@
 """Тандоолор (избранное) Blueprint'и — /api/favorites."""
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 
+from app.decorators import active_jwt_required
 from app.extensions import db
-from app.models import Favorite, Property, User
+from app.models import Favorite, Property
 from app.utils.http import error, iso, success
 
 favorites_bp = Blueprint("favorites", __name__, url_prefix="/favorites")
@@ -43,22 +44,16 @@ def favorites_ping():
 
 
 @favorites_bp.get("")
+@active_jwt_required
 def list_favorites():
     """
-    Колдонуучунун тандоолорунун тизмеси.
-
-    `user_id` аргументи аркылуу кайсы колдонуучунун тандоолору
-    көрсөтүлөрү аныкталат (аутентификация кийинки кадамда).
+    Колдонуучунун тандоолорунун тизмеси (JWT'тен аныкталат).
     ---
     tags:
       - favorites
     summary: Колдонуучунун тандоолору
-    parameters:
-      - name: user_id
-        in: query
-        type: integer
-        required: true
-        description: Колдонуучунун ID
+    security:
+      - Bearer: []
     responses:
       200:
         description: Тандоолордун тизмеси
@@ -78,15 +73,8 @@ def list_favorites():
                     type: integer
                   created_at:
                     type: string
-      400:
-        description: user_id көрсөтүлбөгөн
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
+      401:
+        description: Аутентификация талап
       500:
         description: Сервер катасы
         schema:
@@ -95,12 +83,8 @@ def list_favorites():
             status:
               type: string
     """
-    user_id = request.args.get("user_id")
-    if not user_id:
-        return error("user_id талап кылынат", 400)
-
     favorites = (
-        Favorite.query.filter_by(user_id=user_id)
+        Favorite.query.filter_by(user_id=g.current_user.id)
         .order_by(Favorite.created_at.desc())
         .all()
     )
@@ -117,15 +101,18 @@ def list_favorites():
 
 
 @favorites_bp.post("")
+@active_jwt_required
 def add_favorite():
     """
-    Мүлктү избранноеге кошуу.
+    Мүлктү избранноеге кошуу (өзүнүн тандоосуна).
 
-    `user_id` жана `property_id` бирге уникалдуу болушу керек.
+    Колдонуучу JWT'тен аныкталат; `property_id` гана кабыл алынат.
     ---
     tags:
       - favorites
     summary: Тандоого кошуу
+    security:
+      - Bearer: []
     parameters:
       - name: body
         in: body
@@ -133,11 +120,8 @@ def add_favorite():
         schema:
           type: object
           required:
-            - user_id
             - property_id
           properties:
-            user_id:
-              type: integer
             property_id:
               type: integer
     responses:
@@ -159,8 +143,17 @@ def add_favorite():
               type: string
             message:
               type: string
+      401:
+        description: Аутентификация талап
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+            message:
+              type: string
       404:
-        description: Колдонуучу же мүлк табылган жок
+        description: Мүлк табылган жок
         schema:
           type: object
           properties:
@@ -177,42 +170,41 @@ def add_favorite():
               type: string
     """
     data = request.get_json(silent=True) or {}
-    user_id = data.get("user_id")
     property_id = data.get("property_id")
-
-    if not user_id or not property_id:
-        return error("user_id жана property_id милдеттүү", 400)
-    if not User.query.get(user_id) or not Property.query.get(property_id):
-        return error("Колдонуучу же мүлк табылган жок", 404)
-    if Favorite.query.filter_by(user_id=user_id, property_id=property_id).first():
+    if not property_id:
+        return error("property_id милдеттүү", 400)
+    if not Property.query.get(property_id):
+        return error("Мүлк табылган жок", 404)
+    if Favorite.query.filter_by(
+        user_id=g.current_user.id, property_id=property_id
+    ).first():
         return error("Бул мүлк буга чейин тандоодо бар", 400)
 
-    fav = Favorite(user_id=user_id, property_id=property_id)
+    fav = Favorite(user_id=g.current_user.id, property_id=property_id)
     db.session.add(fav)
     db.session.commit()
     return success({"id": fav.id}, status=201, message="Тандоого кошулду")
 
 
 @favorites_bp.delete("/<int:property_id>")
+@active_jwt_required
 def remove_favorite(property_id):
     """
-    Мүлктү избранноеден алып салуу.
+    Мүлктү избранноеден алып салуу (өзүнүн тандоосунан).
 
-    `user_id` аргументи керек — кийинки кадамда JWT'тен алынат.
+    Колдонуучу JWT'тен аныкталат.
     ---
     tags:
       - favorites
     summary: Тандоодон алып салуу
+    security:
+      - Bearer: []
     parameters:
       - name: property_id
         in: path
         type: integer
         required: true
         description: Мүлктүн ID
-      - name: user_id
-        in: query
-        type: integer
-        required: true
     responses:
       200:
         description: Тандоодон алынды
@@ -223,8 +215,8 @@ def remove_favorite(property_id):
               type: string
             message:
               type: string
-      400:
-        description: user_id көрсөтүлбөгөн
+      401:
+        description: Аутентификация талап
         schema:
           type: object
           properties:
@@ -247,11 +239,9 @@ def remove_favorite(property_id):
             status:
               type: string
     """
-    user_id = request.args.get("user_id")
-    if not user_id:
-        return error("user_id талап кылынат", 400)
-
-    fav = Favorite.query.filter_by(user_id=user_id, property_id=property_id).first()
+    fav = Favorite.query.filter_by(
+        user_id=g.current_user.id, property_id=property_id
+    ).first()
     if not fav:
         return error("Тандоо табылган жок", 404)
 

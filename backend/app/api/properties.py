@@ -1,6 +1,7 @@
 """Кыймылсыз мүлк жарнамалары Blueprint'и — /api/properties."""
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 
+from app.decorators import active_jwt_required
 from app.extensions import db
 from app.models import Property, PropertyImage
 from app.utils.http import error, iso, success
@@ -255,17 +256,19 @@ def get_property(property_id):
 
 
 @properties_bp.post("")
+@active_jwt_required
 def create_property():
     """
-    Жаңы жарнама түзүү.
+    Жаңы жарнама түзүү (аутентификацияланган колдонуучу).
 
-    Мисал базасы үчүн `owner_id` түздөн-түз берилет (аутентификация
-    кийинки кадамда кошулат). Милдеттүү: title, price, owner_id,
-    category_id, city_id.
+    Ээси (owner) JWT токенден аныкталат — `owner_id` body'ден алынбайт.
+    Милдеттүү: title, price, category_id, city_id.
     ---
     tags:
       - properties
     summary: Жаңы жарнама түзүү
+    security:
+      - Bearer: []
     parameters:
       - name: body
         in: body
@@ -275,7 +278,6 @@ def create_property():
           required:
             - title
             - price
-            - owner_id
             - category_id
             - city_id
           properties:
@@ -297,8 +299,6 @@ def create_property():
             property_type:
               type: string
               default: apartment
-            owner_id:
-              type: integer
             category_id:
               type: integer
             city_id:
@@ -310,39 +310,15 @@ def create_property():
     responses:
       201:
         description: Жарнама түзүлдү
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-            data:
-              type: object
-              properties:
-                id:
-                  type: integer
-                title:
-                  type: string
       400:
         description: Валидация катасы (милдеттүү талаа жетпейт)
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
+      401:
+        description: Аутентификация талап
       500:
         description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
     """
     data = request.get_json(silent=True) or {}
-    required = ["title", "price", "owner_id", "category_id", "city_id"]
+    required = ["title", "price", "category_id", "city_id"]
     missing = [f for f in required if not data.get(f)]
     if missing:
         return error(f"Милдеттүү талаалар: {', '.join(missing)}", 400)
@@ -354,7 +330,7 @@ def create_property():
         currency=data.get("currency", "KGS"),
         deal_type=data.get("deal_type", "sale"),
         property_type=data.get("property_type", "apartment"),
-        owner_id=data["owner_id"],
+        owner_id=g.current_user.id,
         category_id=data["category_id"],
         city_id=data["city_id"],
         district_id=data.get("district_id"),

@@ -82,6 +82,35 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
     jwt.init_app(app)
 
+    # ---- JWT callback'тери: ырааттуу JSON каталар + колдонуучу жүктөө ----
+    from app.models import User as _User
+
+    @jwt.user_identity_loader
+    def _user_identity_loader(identity):
+        return str(identity)
+
+    @jwt.user_lookup_loader
+    def _user_lookup_loader(_jwt_header, jwt_data):
+        ident = jwt_data.get("sub")
+        if not ident:
+            return None
+        try:
+            return db.session.get(_User, int(ident))
+        except (TypeError, ValueError):
+            return None
+
+    @jwt.unauthorized_loader
+    def _unauthorized_loader(_reason):
+        return jsonify({"status": "error", "message": "Аутентификация талап кылынат"}), 401
+
+    @jwt.invalid_token_loader
+    def _invalid_token_loader(_reason):
+        return jsonify({"status": "error", "message": "Жараксыз токен"}), 401
+
+    @jwt.expired_token_loader
+    def _expired_token_loader(_header, _payload):
+        return jsonify({"status": "error", "message": "Токендин мөөнөтү өткөн"}), 401
+
     # Бардык моделдерди каттоо (db.create_all / alembic көрүшү үчүн)
     with app.app_context():
         from app import models  # noqa: F401
