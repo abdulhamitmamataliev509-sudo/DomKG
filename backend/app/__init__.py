@@ -1,9 +1,54 @@
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
+from flasgger import Swagger
 from sqlalchemy import text
 from config import config_by_name
 from app.extensions import db, migrate
+
+
+# ---------------------------------------------------------------------------
+# Swagger / Flasgger конфигурациясы
+# ---------------------------------------------------------------------------
+SWAGGER_TEMPLATE = {
+    "swagger": "2.0",
+    "info": {
+        "title": "DomKG Real Estate API",
+        "description": (
+            "DomKG кыймылсыз мүлк платформасынын REST API документтациясы"
+        ),
+        "version": "1.0.0",
+    },
+    "basePath": "/",
+    "schemes": ["http"],
+    "consumes": ["application/json"],
+    "produces": ["application/json"],
+}
+
+SWAGGER_CONFIG = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec",
+            "route": "/apispec.json",
+            "rule_filter": lambda rule: str(rule.rule).startswith("/api/"),
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs/",
+}
+
+
+def register_swagger(app):
+    """Swagger UI (Flasgger) өндүрүп, /apidocs/ дареги боюнча ачат."""
+    return Swagger(
+        app,
+        template=SWAGGER_TEMPLATE,
+        config=SWAGGER_CONFIG,
+    )
+
 
 def create_app(config_name=None):
     if config_name is None:
@@ -27,6 +72,9 @@ def create_app(config_name=None):
     # API blueprint'терин каттоо (/api/*)
     from app.api import register_blueprints
     register_blueprints(app)
+
+    # Swagger UI (/apidocs/) — blueprint'тер катталган соң ишке киришет
+    register_swagger(app)
 
     # Health & DB Test Endpoint
     @app.route("/")
