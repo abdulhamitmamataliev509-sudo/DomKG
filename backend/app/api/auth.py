@@ -3,6 +3,7 @@
 Катталуу, кирүү жана учурдагы колдонуучу операциялары.
 """
 from flask import Blueprint, request
+from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
@@ -114,12 +115,17 @@ def register():
             data:
               type: object
               properties:
-                id:
-                  type: integer
-                email:
+                access_token:
                   type: string
-                first_name:
-                  type: string
+                user:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    email:
+                      type: string
+                    first_name:
+                      type: string
       400:
         description: Валидация катасы (милдеттүү талаа жетишпейт)
         schema:
@@ -161,7 +167,13 @@ def register():
     )
     db.session.add(user)
     db.session.commit()
-    return success(_user_dict(user), status=201, message="Колдонуучу катталды")
+
+    access_token = create_access_token(identity=str(user.id))
+    return success(
+        {"user": _user_dict(user), "access_token": access_token},
+        status=201,
+        message="Колдонуучу катталды",
+    )
 
 
 @auth_bp.post("/login")
@@ -169,8 +181,8 @@ def login():
     """
     Колдонуучуну киргизүү.
 
-    Email жана пароль текшерилет. JWT токен кийинки кадамда ишке
-    ашат — азырынча колдонуучунун маалыматы кайтарылат.
+    Email жана пароль текшерилип, ийгиликтүү болсо JWT access_token
+    кайтарылат.
     ---
     tags:
       - auth
@@ -205,12 +217,17 @@ def login():
             data:
               type: object
               properties:
-                id:
-                  type: integer
-                email:
+                access_token:
                   type: string
-                first_name:
-                  type: string
+                user:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    email:
+                      type: string
+                    first_name:
+                      type: string
       400:
         description: Валидация катасы (талаа жет пейт)
         schema:
@@ -248,30 +265,65 @@ def login():
     if not user or not check_password_hash(user.password_hash, password):
         return error("Email же пароль туура эмес", 401)
 
-    return success(_user_dict(user), message="Кирүү ийгиликтүү")
+    access_token = create_access_token(identity=str(user.id))
+    return success(
+        {"user": _user_dict(user), "access_token": access_token},
+        message="Кирүү ийгиликтүү",
+    )
 
 
 @auth_bp.get("/me")
+@jwt_required()
 def me():
     """
     Учурдагы колдонуучунун профили.
 
-    Аутентификация (JWT) кийинки кадамда ишке ашат; азырынча 401
-    кайтарат.
+    `Authorization: Bearer <token>` заголовогу керек. Токендин
+    идентификациясы боюнча учурдагы колдонуучу кайтарылат.
     ---
     tags:
       - auth
     summary: Учурдагы колдонуучунун маалыматы
-    description: Аутентификация али ишке ашкан эмес — 401 кайтарылат.
+    parameters:
+      - name: Authorization
+        in: header
+        type: string
+        required: true
+        default: "Bearer <access_token>"
+        description: JWT access токен
     responses:
-      401:
-        description: Аутентификация керек (JWT кийинки кадамда)
+      200:
+        description: Учурдагы колдонуучунун маалыматы
         schema:
           type: object
           properties:
             status:
               type: string
-              example: error
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                email:
+                  type: string
+                first_name:
+                  type: string
+      401:
+        description: Токен жетпейт же жараксыз
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+            message:
+              type: string
+      404:
+        description: Колдонуучу табылган жок
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
             message:
               type: string
       500:
@@ -282,4 +334,8 @@ def me():
             status:
               type: string
     """
-    return error("Аутентификация (JWT) кийинки кадамда ишке ашат", 401)
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    if not user:
+        return error("Колдонуучу табылган жок", 404)
+    return success(_user_dict(user))

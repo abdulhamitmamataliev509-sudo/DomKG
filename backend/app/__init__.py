@@ -4,7 +4,7 @@ from flask_cors import CORS
 from flasgger import Swagger
 from sqlalchemy import text
 from config import config_by_name
-from app.extensions import db, migrate
+from app.extensions import db, jwt, migrate
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,7 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
+    jwt.init_app(app)
 
     # Бардык моделдерди каттоо (db.create_all / alembic көрүшү үчүн)
     with app.app_context():
