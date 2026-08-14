@@ -24,7 +24,13 @@ SWAGGER_TEMPLATE = {
             "type": "apiKey",
             "name": "Authorization",
             "in": "header",
-            "description": "JWT Токенди кийинкидей форматта киргизиңиз: Bearer <your_token>"
+            "description": "Access токен. Формат: Bearer <your_access_token>"
+        },
+        "RefreshToken": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "Refresh токен. Формат: Bearer <your_refresh_token>"
         }
     },
     "security": [

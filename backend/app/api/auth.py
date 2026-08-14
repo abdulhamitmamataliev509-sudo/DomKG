@@ -1,9 +1,14 @@
 """Аутентификация Blueprint'и — /api/auth.
 
-Катталуу, кирүү жана учурдагы колдонуучу операциялары.
+Катталуу, кирүү, токен жаңылоо жана учурдагы колдонуучу операциялары.
 """
 from flask import Blueprint, request
-from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    get_jwt_identity,
+    jwt_required,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db
@@ -32,33 +37,13 @@ def _user_dict(user):
 def auth_ping():
     """
     Сервистин ден соолугун текшерүү.
-
-    Blueprint'тин иштээрин ырастоочу эң жөнөкөй эндпоинт.
     ---
     tags:
       - auth
     summary: Auth сервисинин ден соолугун текшерүү
-    description: Жөнөкөй ping чакуу — auth blueprint'инин катталгандыгын көрсөтөт.
     responses:
       200:
         description: Сервис иштеп жатат
-        schema:
-          type: object
-          properties:
-            service:
-              type: string
-              example: auth
-            status:
-              type: string
-              example: ok
-      500:
-        description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-              example: error
     """
     return success({"service": "auth", "status": "ok"})
 
@@ -66,10 +51,7 @@ def auth_ping():
 @auth_bp.post("/register")
 def register():
     """
-    Жаңы колдонуучуну катталуу.
-
-    Электрондук почта, пароль жана ысым милдеттүү. Пароль
-    hash'талып сакталат; email уникалдуу болушу керек.
+    Жаңы колдонуучуну каттоо.
     ---
     tags:
       - auth
@@ -104,46 +86,6 @@ def register():
     responses:
       201:
         description: Колдонуучу ийгиликтүү катталды
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-              example: success
-            message:
-              type: string
-            data:
-              type: object
-              properties:
-                access_token:
-                  type: string
-                user:
-                  type: object
-                  properties:
-                    id:
-                      type: integer
-                    email:
-                      type: string
-                    first_name:
-                      type: string
-      400:
-        description: Валидация катасы (милдеттүү талаа жетишпейт)
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-      500:
-        description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
     """
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
@@ -169,8 +111,13 @@ def register():
     db.session.commit()
 
     access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
     return success(
-        {"user": _user_dict(user), "access_token": access_token},
+        {
+            "user": _user_dict(user),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        },
         status=201,
         message="Колдонуучу катталды",
     )
@@ -180,9 +127,6 @@ def register():
 def login():
     """
     Колдонуучуну киргизүү.
-
-    Email жана пароль текшерилип, ийгиликтүү болсо JWT access_token
-    кайтарылат.
     ---
     tags:
       - auth
@@ -207,52 +151,8 @@ def login():
     responses:
       200:
         description: Ийгиликтүү кирүү
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-            data:
-              type: object
-              properties:
-                access_token:
-                  type: string
-                user:
-                  type: object
-                  properties:
-                    id:
-                      type: integer
-                    email:
-                      type: string
-                    first_name:
-                      type: string
-      400:
-        description: Валидация катасы (талаа жет пейт)
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
       401:
         description: Туура эмес email же пароль
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-      500:
-        description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
     """
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
@@ -266,10 +166,37 @@ def login():
         return error("Email же пароль туура эмес", 401)
 
     access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
     return success(
-        {"user": _user_dict(user), "access_token": access_token},
+        {
+            "user": _user_dict(user),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        },
         message="Кирүү ийгиликтүү",
     )
+
+
+@auth_bp.post("/refresh")
+@jwt_required(refresh=True)
+def refresh():
+    """
+    Access токенди жаңылоо (Refresh Token аркылуу).
+    ---
+    tags:
+      - auth
+    summary: Access токенди жаңылоо
+    security:
+      - RefreshToken: []
+    responses:
+      200:
+        description: Жаңы access токен берилди
+      401:
+        description: Refresh токен туура эмес же мөөнөтү өткөн
+    """
+    user_id = get_jwt_identity()
+    new_access_token = create_access_token(identity=str(user_id))
+    return success({"access_token": new_access_token}, message="Токен жаңыланды")
 
 
 @auth_bp.get("/me")
@@ -277,62 +204,19 @@ def login():
 def me():
     """
     Учурдагы колдонуучунун профили.
-
-    `Authorization: Bearer <token>` заголовогу керек. Токендин
-    идентификациясы боюнча учурдагы колдонуучу кайтарылат.
     ---
     tags:
       - auth
     summary: Учурдагы колдонуучунун маалыматы
-    parameters:
-      - name: Authorization
-        in: header
-        type: string
-        required: true
-        default: "Bearer <access_token>"
-        description: JWT access токен
+    security:
+      - Bearer: []
     responses:
       200:
         description: Учурдагы колдонуучунун маалыматы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            data:
-              type: object
-              properties:
-                id:
-                  type: integer
-                email:
-                  type: string
-                first_name:
-                  type: string
       401:
         description: Токен жетпейт же жараксыз
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
       404:
         description: Колдонуучу табылган жок
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-      500:
-        description: Сервер катасы
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
     """
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
