@@ -15,14 +15,27 @@ SWAGGER_TEMPLATE = {
     "info": {
         "title": "DomKG Real Estate API",
         "description": (
-            "DomKG кыймылсыз мүлк платформасынын REST API документтациясы"
+            "DomKG кыймылсыз мүлк платформасынын REST API документациясы"
         ),
         "version": "1.0.0",
     },
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Токенди кийинкидей форматта киргизиңиз: Bearer <your_token>"
+        }
+    },
+    "security": [
+        {
+            "Bearer": []
+        }
+    ],
     "basePath": "/",
     "schemes": ["http"],
     "consumes": ["application/json"],
-    "produces": ["application/json"],
+    "produces": ["application/json"]
 }
 
 SWAGGER_CONFIG = {
