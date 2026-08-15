@@ -22,9 +22,13 @@ def main() -> int:
     for url, expected in pings:
         resp = client.get(url)
         status_ok = resp.status_code == expected
-        data = resp.get_json()
-        shape_ok = (data or {}).get("status") == "ok" if url != "/api/" else (data or {}).get("service") == "DomKG API"
-        print(f"  {'PASS' if status_ok and shape_ok else 'FAIL'}  GET {url:30s} -> {resp.status_code} {data}")
+        data = resp.get_json() or {}
+        if url == "/api/":
+            shape_ok = data.get("service") == "DomKG API"
+        else:
+            # Жооп форматы: {status: success, data: {service, status: ok}}
+            shape_ok = data.get("status") == "success" and (data.get("data") or {}).get("status") == "ok"
+        print(f"  {'PASS' if status_ok and shape_ok else 'FAIL'}  GET {url:30s} -> {resp.status_code}")
         ok = ok and status_ok and shape_ok
 
     print("\n[OK] Бардык blueprint HTTP деңгээлинде иштейт." if ok
