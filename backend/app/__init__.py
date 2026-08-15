@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flasgger import Swagger
 from sqlalchemy import text
 from config import config_by_name
+from app.errors import problem_response, register_error_handlers
 from app.extensions import db, jwt, migrate
 
 
@@ -101,15 +102,15 @@ def create_app(config_name=None):
 
     @jwt.unauthorized_loader
     def _unauthorized_loader(_reason):
-        return jsonify({"status": "error", "message": "Аутентификация талап кылынат"}), 401
+        return problem_response(401, "Authentication required")
 
     @jwt.invalid_token_loader
     def _invalid_token_loader(_reason):
-        return jsonify({"status": "error", "message": "Жараксыз токен"}), 401
+        return problem_response(401, "Invalid or malformed token")
 
     @jwt.expired_token_loader
     def _expired_token_loader(_header, _payload):
-        return jsonify({"status": "error", "message": "Токендин мөөнөтү өткөн"}), 401
+        return problem_response(401, "Token has expired")
 
     # Бардык моделдерди каттоо (db.create_all / alembic көрүшү үчүн)
     with app.app_context():
@@ -124,6 +125,9 @@ def create_app(config_name=None):
 
     # Swagger UI (/apidocs/) — blueprint'тер катталган соң ишке киришет
     register_swagger(app)
+
+    # Глобалдык JSON error handling (400/401/403/404/405/409/422/429/500)
+    register_error_handlers(app)
 
     # Health & DB Test Endpoint
     @app.route("/")
@@ -141,10 +145,12 @@ def create_app(config_name=None):
                 "message": "PostgreSQL connection is healthy!"
             }), 200
         except Exception as e:
+            # Ички маалыматтар агызылбайт — сервер тарапка гана жазылат
+            app.logger.error("Health check: DB connection failed: %s", e)
             return jsonify({
                 "status": "error",
                 "database": "disconnected",
-                "error": str(e)
+                "error": "Database connection failed"
             }), 500
 
     return app

@@ -12,22 +12,8 @@ import pytest
 from flask_jwt_extended import create_access_token
 from werkzeug.security import generate_password_hash
 
-from app import create_app
 from app.extensions import db
 from app.models import Admin, Category, City, Favorite, Property, Report, User
-
-
-@pytest.fixture(scope="session")
-def app():
-    # Blueprint'тер модулдук синглтон — app бир гана жолу түзүлөт
-    application = create_app("test")
-    application.config["TESTING"] = True
-    with application.app_context():
-        db.create_all()
-    yield application
-    with application.app_context():
-        db.session.remove()
-        db.drop_all()
 
 
 def _seed(app):
@@ -88,11 +74,6 @@ def _fresh_db(app):
         db.create_all()
         _seed(app)
     yield
-
-
-@pytest.fixture()
-def client(app):
-    return app.test_client()
 
 
 def _seed_data(app):

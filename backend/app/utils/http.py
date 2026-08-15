@@ -1,16 +1,20 @@
 """HTTP жооптор үчүн консистенттүү helper'дер.
 
-Бардык API жооптору бирдей форматка ээ болот:
-    success -> {"status": "success", "message": ..., "data": ...}
-    error   -> {"status": "error", "message": ..., "errors": ...}
+Ийгиликтүү жооп (өзгөрүлбөгөн):
+    {"status": "success", "message": ..., "data": ...}
+
+Ката жообу (жаңы бирдиктүү формат, Phase 18):
+    {"success": false, "error": {"code": "BAD_REQUEST", "message": "..."}}
 """
 from datetime import datetime
 
 from flask import jsonify
 
+from app.errors import make_error_body
+
 
 def success(data=None, status=200, message=None):
-    """Ийгиликтүү жооп (200/201)."""
+    """Ийгиликтүү жооп (өзгөрүлбөйт — мурунку контракт)."""
     payload = {"status": "success"}
     if message is not None:
         payload["message"] = message
@@ -19,11 +23,16 @@ def success(data=None, status=200, message=None):
     return jsonify(payload), status
 
 
-def error(message, status=400, errors=None):
-    """Ката жообу (400/401/404/500...)."""
-    payload = {"status": "error", "message": message}
-    if errors is not None:
-        payload["errors"] = errors
+def error(message, status=400, code=None, errors=None):
+    """Ката жообу — бирдиктүү глобалдык формат колдонулат.
+
+    Args:
+        message: Адамга түшүнүктүү билдирүү.
+        status: HTTP статус коду.
+        code: Опционалдуу код (мис. "BAD_REQUEST") — берилбесе DEFAULT_ERROR_CODES колдонулат.
+        errors: (deprecated) details үчүн, миг. валидация каталары.
+    """
+    payload = make_error_body(message, status=status, code=code, details=errors)
     return jsonify(payload), status
 
 
