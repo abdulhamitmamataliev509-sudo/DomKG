@@ -1,0 +1,26 @@
+# Render Blueprint for the DomKG backend service.
+#
+# The `app` package and `config.py` live under `backend/`, so we set
+# `rootDir: backend`. This makes `from app import create_app` (and
+# `from config import ...`) resolvable during build and startup,
+# which fixes:  ModuleNotFoundError: No module named 'app'
+services:
+  - type: web
+    name: domkg-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2
+    healthCheckPath: /
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      # Provide DATABASE_URL from a Render PostgreSQL instance
+      # (e.g. postgresql://user:pass@host:5432/domkg_db).
+      - key: DATABASE_URL
+        sync: false
