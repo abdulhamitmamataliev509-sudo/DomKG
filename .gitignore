@@ -54,3 +54,6 @@ Thumbs.db
 
 # ---- Docs build artifacts ----
 docs/_build/
+
+.vercel
+.env*
