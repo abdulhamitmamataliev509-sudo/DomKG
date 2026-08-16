@@ -5,7 +5,7 @@ from flasgger import Swagger
 from sqlalchemy import text
 from config import config_by_name
 from app.errors import problem_response, register_error_handlers
-from app.extensions import db, jwt, migrate
+from app.extensions import db, jwt, limiter, migrate
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,8 @@ def create_app(config_name=None):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+    # Rate limiting — config'тен RATELIMIT_ENABLED/RATELIMIT_STORAGE_URI окулат
+    limiter.init_app(app)
 
     # ---- JWT callback'тери: ырааттуу JSON каталар + колдонуучу жүктөө ----
     from app.models import User as _User
@@ -111,6 +113,25 @@ def create_app(config_name=None):
     @jwt.expired_token_loader
     def _expired_token_loader(_header, _payload):
         return problem_response(401, "Token has expired")
+
+    from app.models import TokenBlocklist as _TokenBlocklist
+
+    @jwt.token_in_blocklist_loader
+    def _token_in_blocklist(_jwt_header, jwt_data):
+        """Revoked токендерди (access жана refresh) четке кагат."""
+        jti = jwt_data.get("jti")
+        if not jti:
+            return False
+        return _TokenBlocklist.query.filter_by(jti=jti).first() is not None
+
+    @jwt.revoked_token_loader
+    def _revoked_token_loader(_jwt_header, _jwt_data):
+        app.logger.warning(
+            "Revoked token used: type=%s jti=%s",
+            _jwt_data.get("type"),
+            _jwt_data.get("jti"),
+        )
+        return problem_response(401, "Token has been revoked")
 
     # Бардык моделдерди каттоо (db.create_all / alembic көрүшү үчүн)
     with app.app_context():

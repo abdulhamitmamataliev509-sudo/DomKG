@@ -2,10 +2,14 @@
 
 Катталуу, кирүү, токен жаңылоо жана учурдагы колдонуучу операциялары.
 """
-from flask import Blueprint, g, request
+from datetime import datetime, timezone
+
+from flask import Blueprint, current_app, g, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
+    decode_token,
+    get_jwt,
     get_jwt_identity,
     jwt_required,
 )
@@ -13,11 +17,24 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.decorators import active_jwt_required
 
-from app.extensions import db
-from app.models import User
+from app.extensions import db, limiter
+from app.models import TokenBlocklist, User
 from app.utils.http import error, iso, success
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+def _revoke_token(jti, token_type, user_id, expires_at):
+    """JWT jti'ни denylist'ке кошот — raw токен сакталбайт, минималдуу маалымат."""
+    if jti and not TokenBlocklist.query.filter_by(jti=jti).first():
+        db.session.add(
+            TokenBlocklist(
+                jti=jti,
+                token_type=token_type,
+                user_id=user_id,
+                expires_at=expires_at,
+            )
+        )
 
 
 def _user_dict(user):
@@ -51,6 +68,7 @@ def auth_ping():
 
 
 @auth_bp.post("/register")
+@limiter.limit(lambda: current_app.config.get("RATE_LIMIT_REGISTER", "5 per minute"))
 def register():
     """
     Жаңы колдонуучуну каттоо.
@@ -126,6 +144,7 @@ def register():
 
 
 @auth_bp.post("/login")
+@limiter.limit(lambda: current_app.config.get("RATE_LIMIT_LOGIN", "10 per minute"))
 def login():
     """
     Колдонуучуну киргизүү.
@@ -165,14 +184,17 @@ def login():
 
     user = User.query.filter_by(email=email).first()
     if not user or not check_password_hash(user.password_hash, password):
+        current_app.logger.warning("Login failed email=%s (bad credentials)", email)
         return error("Email же пароль туура эмес", 401)
     # Деактивацияланган аккаунт кире албайт (колдонуучуну санашоо кылбаш үчүн
     # ошол эле жалпы 401-сообщение кайтарылат).
     if not user.is_active:
+        current_app.logger.warning("Login blocked for inactive user id=%s", user.id)
         return error("Email же пароль туура эмес", 401)
 
     access_token = create_access_token(identity=str(user.id))
     refresh_token = create_refresh_token(identity=str(user.id))
+    current_app.logger.info("Login success user_id=%s", user.id)
     return success(
         {
             "user": _user_dict(user),
@@ -226,3 +248,81 @@ def me():
         description: Токен жетпейт же аккаунт өчүрүлгөн
     """
     return success(_user_dict(g.current_user))
+
+
+@auth_bp.post("/logout")
+@active_jwt_required
+def logout():
+    """
+    Чыгуу — refresh токенди (жана учурдагы access токенди) revoked кылат.
+
+    Талап: `Authorization: Bearer <access_token>` + body'де `refresh_token`.
+    ---
+    tags:
+      - auth
+    summary: Чыгуу (refresh токенди жокко чыгаруу)
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - refresh_token
+          properties:
+            refresh_token:
+              type: string
+              description: Revoked кылынучу refresh токен (login'ден алынган)
+    responses:
+      200:
+        description: Чыгуу ийгиликтүү — refresh жана access revoked
+      400:
+        description: refresh_token жеткирилген жок
+      401:
+        description: Аутентификация талап / туура эмес refresh токен
+      403:
+        description: Refresh токен башка колдонуучуга таандык
+    """
+    data = request.get_json(silent=True) or {}
+    refresh_token = (data.get("refresh_token") or "").strip()
+    if not refresh_token:
+        return error("refresh_token талап кылынат", 400)
+
+    try:
+        decoded = decode_token(refresh_token)
+    except Exception:
+        current_app.logger.warning("Logout with invalid refresh token user_id=%s", g.current_user.id)
+        return error("Refresh токен туура эмес", 401)
+
+    if decoded.get("type") != "refresh":
+        return error("Refresh токен керек", 400)
+    if str(decoded.get("sub")) != str(g.current_user.id):
+        current_app.logger.warning(
+            "Logout rejected: refresh token belongs to another user (%s != %s)",
+            decoded.get("sub"),
+            g.current_user.id,
+        )
+        return error("Refresh токен учурдагы колдонуучуга таандык эмес", 403)
+
+    access_payload = get_jwt()
+    _revoke_token(
+        access_payload.get("jti"),
+        "access",
+        g.current_user.id,
+        datetime.fromtimestamp(access_payload["exp"], timezone.utc)
+        if access_payload.get("exp")
+        else None,
+    )
+    _revoke_token(
+        decoded.get("jti"),
+        "refresh",
+        g.current_user.id,
+        datetime.fromtimestamp(decoded["exp"], timezone.utc)
+        if decoded.get("exp")
+        else None,
+    )
+    db.session.commit()
+    current_app.logger.info("Logout user_id=%s (access+refresh revoked)", g.current_user.id)
+    return success(message="Чыгуу ийгиликтүү — токендер жокко чыгарылды")

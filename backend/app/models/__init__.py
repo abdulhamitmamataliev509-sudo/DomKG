@@ -13,6 +13,7 @@ from app.models.message import Message
 from app.models.notification import Notification
 from app.models.report import Report
 from app.models.view import View
+from app.models.token_blocklist import TokenBlocklist
 
 __all__ = [
     # base helpers
@@ -31,4 +32,5 @@ __all__ = [
     "Notification",
     "Report",
     "View",
+    "TokenBlocklist",
 ]

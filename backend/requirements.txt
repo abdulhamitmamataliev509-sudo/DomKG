@@ -7,5 +7,6 @@ Flask-Cors==4.0.0
 marshmallow==3.20.2
 flasgger==0.9.7.1
 flask-jwt-extended
+flask-limiter==3.8.0
 pytest==8.3.3
 gunicorn==21.2.0
