@@ -11,41 +11,10 @@
 """
 import pytest
 from sqlalchemy.orm import Session
-from werkzeug.exceptions import (
-    BadRequest,
-    Conflict,
-    TooManyRequests,
-    UnprocessableEntity,
-)
 from werkzeug.security import generate_password_hash
 
 from app.extensions import db
 from app.models import User
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _test_routes(app):
-    """Error handler'лерди текшерүүгө арналган тест-маршруттар (бир жолу)."""
-    @app.route("/__err/400")
-    def _err_400():
-        raise BadRequest("bad payload")
-
-    @app.route("/__err/409")
-    def _err_409():
-        raise Conflict("duplicate resource")
-
-    @app.route("/__err/422")
-    def _err_422():
-        raise UnprocessableEntity("invalid fields")
-
-    @app.route("/__err/429")
-    def _err_429():
-        raise TooManyRequests("slow down")
-
-    @app.route("/__err/500")
-    def _err_500():
-        raise RuntimeError("boom-secret-db-detail")
-    yield
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +136,7 @@ def test_health_db_does_not_leak_internals(monkeypatch, client):
 
     monkeypatch.setattr(Session, "execute", _boom)
     resp = client.get("/health/db")
-    assert resp.status_code == 500
+    assert resp.status_code == 503
     body = resp.get_json()
     assert body.get("database") == "disconnected"
     assert "secret-dsn" not in repr(body)

@@ -1,9 +1,13 @@
 """Тандоолор (избранное) Blueprint'и — /api/favorites."""
 from flask import Blueprint, g, request
+from marshmallow import ValidationError
 
 from app.decorators import active_jwt_required
 from app.extensions import db
-from app.models import Favorite, Property
+from app.models import Favorite
+from app.schemas import FavoriteCreateSchema
+from app.services import ServiceError
+from app.services.favorite_service import FavoriteService
 from app.utils.http import error, iso, success
 
 favorites_bp = Blueprint("favorites", __name__, url_prefix="/favorites")
@@ -83,21 +87,15 @@ def list_favorites():
             status:
               type: string
     """
-    favorites = (
-        Favorite.query.filter_by(user_id=g.current_user.id)
-        .order_by(Favorite.created_at.desc())
-        .all()
-    )
-    return success(
-        [
-            {
-                "id": f.id,
-                "property_id": f.property_id,
-                "created_at": iso(f.created_at),
-            }
-            for f in favorites
-        ]
-    )
+    favorites = FavoriteService.list_for_user(g.current_user)
+    return success([
+        {
+            "id": f.id,
+            "property_id": f.property_id,
+            "created_at": iso(f.created_at),
+        }
+        for f in favorites
+    ])
 
 
 @favorites_bp.post("")
@@ -169,20 +167,14 @@ def add_favorite():
             status:
               type: string
     """
-    data = request.get_json(silent=True) or {}
-    property_id = data.get("property_id")
-    if not property_id:
-        return error("property_id милдеттүү", 400)
-    if not Property.query.get(property_id):
-        return error("Мүлк табылган жок", 404)
-    if Favorite.query.filter_by(
-        user_id=g.current_user.id, property_id=property_id
-    ).first():
-        return error("Бул мүлк буга чейин тандоодо бар", 400)
-
-    fav = Favorite(user_id=g.current_user.id, property_id=property_id)
-    db.session.add(fav)
-    db.session.commit()
+    try:
+        payload = FavoriteCreateSchema().load(request.get_json(silent=True) or {})
+    except ValidationError as exc:
+        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+    try:
+        fav = FavoriteService.add(g.current_user, payload)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
     return success({"id": fav.id}, status=201, message="Тандоого кошулду")
 
 
@@ -239,12 +231,8 @@ def remove_favorite(property_id):
             status:
               type: string
     """
-    fav = Favorite.query.filter_by(
-        user_id=g.current_user.id, property_id=property_id
-    ).first()
-    if not fav:
-        return error("Тандоо табылган жок", 404)
-
-    db.session.delete(fav)
-    db.session.commit()
+    try:
+        FavoriteService.remove(g.current_user, property_id)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
     return success(message="Тандоодон алынды")

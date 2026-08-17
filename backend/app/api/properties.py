@@ -1,59 +1,21 @@
 """Кыймылсыз мүлк жарнамалары Blueprint'и — /api/properties."""
 from flask import Blueprint, g, request
+from marshmallow import ValidationError
 
 from app.decorators import active_jwt_required
 from app.extensions import db
-from app.models import Property, PropertyImage
-from app.utils.http import error, iso, success
+from app.models import Property
+from app.schemas import PropertyCreateSchema, PropertyUpdateSchema
+from app.services import ServiceError
+from app.services.property_service import PropertyService
+from app.utils.http import error, success
 
 properties_bp = Blueprint("properties", __name__, url_prefix="/properties")
 
 
 def _property_dict(prop, include_owner=False):
     """Property моделинин көрүнүшү."""
-    data = {
-        "id": prop.id,
-        "title": prop.title,
-        "description": prop.description,
-        "deal_type": prop.deal_type,
-        "property_type": prop.property_type,
-        "price": str(prop.price) if prop.price is not None else None,
-        "price_per_m2": str(prop.price_per_m2) if prop.price_per_m2 is not None else None,
-        "currency": prop.currency,
-        "owner_id": prop.owner_id,
-        "category_id": prop.category_id,
-        "city_id": prop.city_id,
-        "district_id": prop.district_id,
-        "rooms": prop.rooms,
-        "floor": prop.floor,
-        "floor_total": prop.floor_total,
-        "area_total": str(prop.area_total) if prop.area_total is not None else None,
-        "address": prop.address,
-        "latitude": str(prop.latitude) if prop.latitude is not None else None,
-        "longitude": str(prop.longitude) if prop.longitude is not None else None,
-        "status": prop.status,
-        "is_featured": prop.is_featured,
-        "view_count": prop.view_count,
-        "published_at": iso(prop.published_at),
-        "created_at": iso(prop.created_at),
-        "images": [
-            {
-                "id": img.id,
-                "image_url": img.image_url,
-                "is_primary": img.is_primary,
-                "sort_order": img.sort_order,
-            }
-            for img in prop.images
-        ],
-    }
-    if include_owner and prop.owner:
-        data["owner"] = {
-            "id": prop.owner.id,
-            "first_name": prop.owner.first_name,
-            "last_name": prop.owner.last_name,
-            "phone": prop.owner.phone,
-        }
-    return data
+    return PropertyService.property_dict(prop, include_owner=include_owner)
 
 
 @properties_bp.get("/ping")
@@ -169,28 +131,19 @@ def list_properties():
               type: string
     """
     try:
-        limit = min(int(request.args.get("limit", 20)), 100)
-        offset = max(int(request.args.get("offset", 0)), 0)
-    except (TypeError, ValueError):
-        return error("limit/offset сан болушу керек", 400)
-
-    query = Property.query.filter(Property.status == "active")
-    if request.args.get("deal_type") in ("sale", "rent"):
-        query = query.filter(Property.deal_type == request.args["deal_type"])
-    if request.args.get("property_type"):
-        query = query.filter(Property.property_type == request.args["property_type"])
-    if request.args.get("city_id"):
-        query = query.filter(Property.city_id == request.args["city_id"])
-    if request.args.get("category_id"):
-        query = query.filter(Property.category_id == request.args["category_id"])
-    if request.args.get("min_price"):
-        query = query.filter(Property.price >= request.args["min_price"])
-    if request.args.get("max_price"):
-        query = query.filter(Property.price <= request.args["max_price"])
-
-    properties = (
-        query.order_by(Property.created_at.desc()).limit(limit).offset(offset).all()
-    )
+        query_params = {
+            "deal_type": request.args.get("deal_type"),
+            "property_type": request.args.get("property_type"),
+            "city_id": request.args.get("city_id"),
+            "category_id": request.args.get("category_id"),
+            "min_price": request.args.get("min_price"),
+            "max_price": request.args.get("max_price"),
+            "limit": request.args.get("limit", 20),
+            "offset": request.args.get("offset", 0),
+        }
+        properties = PropertyService.list_properties(query_params)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
     return success([_property_dict(p) for p in properties])
 
 
@@ -246,9 +199,10 @@ def get_property(property_id):
             status:
               type: string
     """
-    prop = Property.query.get(property_id)
-    if not prop or prop.status != "active":
-        return error("Жарнама табылган жок", 404)
+    try:
+        prop = PropertyService.get_property(property_id)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
 
     prop.increment_view()
     db.session.commit()
@@ -317,29 +271,12 @@ def create_property():
       500:
         description: Сервер катасы
     """
-    data = request.get_json(silent=True) or {}
-    required = ["title", "price", "category_id", "city_id"]
-    missing = [f for f in required if not data.get(f)]
-    if missing:
-        return error(f"Милдеттүү талаалар: {', '.join(missing)}", 400)
-
-    prop = Property(
-        title=data["title"],
-        description=data.get("description"),
-        price=data["price"],
-        currency=data.get("currency", "KGS"),
-        deal_type=data.get("deal_type", "sale"),
-        property_type=data.get("property_type", "apartment"),
-        owner_id=g.current_user.id,
-        category_id=data["category_id"],
-        city_id=data["city_id"],
-        district_id=data.get("district_id"),
-        rooms=data.get("rooms"),
-        floor=data.get("floor"),
-        floor_total=data.get("floor_total"),
-        address=data.get("address"),
-        status=data.get("status", "active"),
-    )
-    db.session.add(prop)
-    db.session.commit()
+    try:
+        payload = PropertyCreateSchema().load(request.get_json(silent=True) or {})
+    except ValidationError as exc:
+        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+    try:
+        prop = PropertyService.create_property(g.current_user, payload)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
     return success(_property_dict(prop), status=201, message="Жарнама түзүлдү")

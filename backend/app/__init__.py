@@ -3,7 +3,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
 from sqlalchemy import text
-from config import config_by_name
+from config import config_by_name, validate_environment
 from app.errors import problem_response, register_error_handlers
 from app.extensions import db, jwt, limiter, migrate
 
@@ -73,10 +73,29 @@ def register_swagger(app):
 def create_app(config_name=None):
     if config_name is None:
         config_name = os.getenv('FLASK_ENV', 'development')
+    if config_name not in config_by_name:
+        config_name = 'development'
+
+    # Production үчүн fail-fast коопсуздук текшерүүсү (секреттер, DEBUG)
+    validate_environment(config_name)
 
     app = Flask(__name__)
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
     app.config.from_object(config_by_name.get(config_name, config_by_name['dev']))
+
+    # ---- CORS: уруксат берилген origin'дер (config'тен; "*" эмес) ----
+    cors_origins = app.config.get('CORS_ORIGINS') or [
+        'http://localhost:5501', 'http://127.0.0.1:5501'
+    ]
+    allow_credentials = bool(app.config.get('CORS_ALLOW_CREDENTIALS', False))
+    if '*' in cors_origins and allow_credentials:
+        raise RuntimeError(
+            'CORS: credentials cannot be combined with wildcard origin.'
+        )
+    CORS(
+        app,
+        resources={r'/api/*': {'origins': cors_origins}},
+        supports_credentials=allow_credentials,
+    )
 
     # Initialize extensions
     db.init_app(app)
@@ -144,8 +163,10 @@ def create_app(config_name=None):
     from app.api import register_blueprints
     register_blueprints(app)
 
-    # Swagger UI (/apidocs/) — blueprint'тер катталган соң ишке киришет
-    register_swagger(app)
+    # Swagger UI — SWAGGER_ENABLED болсо гана (/apidocs/, /apispec.json)
+    # Production'до default өчүк; development'де иштейт.
+    if app.config.get('SWAGGER_ENABLED', False):
+        register_swagger(app)
 
     # Глобалдык JSON error handling (400/401/403/404/405/409/422/429/500)
     register_error_handlers(app)
@@ -155,8 +176,15 @@ def create_app(config_name=None):
     def index():
         return jsonify({"message": "DomKG API is running", "status": "ok"})
 
+    @app.route("/health")
+    def health():
+        """Liveness-текшерилүү — сервис иштеп жатканын көрсөтөт."""
+        return jsonify({"status": "ok"}), 200
+
     @app.route("/health/db")
     def db_health():
+        """Database reachability — ички маалыматтар (connection string, SQL,
+        stack) эч качан чыкпайт; ката болсо 503 + жалпы message."""
         try:
             # PostgreSQL туташуусун текшерүү
             db.session.execute(text("SELECT 1"))
@@ -166,12 +194,12 @@ def create_app(config_name=None):
                 "message": "PostgreSQL connection is healthy!"
             }), 200
         except Exception as e:
-            # Ички маалыматтар агызылбайт — сервер тарапка гана жазылат
+            # Ички чоо-жай сервер логуна гана; клиентке жалпы жооп
             app.logger.error("Health check: DB connection failed: %s", e)
             return jsonify({
                 "status": "error",
                 "database": "disconnected",
                 "error": "Database connection failed"
-            }), 500
+            }), 503
 
     return app

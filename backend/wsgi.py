@@ -1,8 +1,10 @@
-"""Production WSGI entrypoint for gunicorn on Render.
+"""Production WSGI entrypoint for gunicorn.
 
-Example start command (with Render root directory = "backend"):
+Example start command (from the backend/ directory):
 
     gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2
+
+Бул — production'до бирден-бир чакыруу чекити. Dev: python run.py.
 """
 import os
 import sys

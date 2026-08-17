@@ -6,19 +6,19 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, g, request
 from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,
     decode_token,
     get_jwt,
     get_jwt_identity,
     jwt_required,
 )
-from werkzeug.security import check_password_hash, generate_password_hash
+from marshmallow import ValidationError
 
 from app.decorators import active_jwt_required
-
 from app.extensions import db, limiter
 from app.models import TokenBlocklist, User
+from app.schemas import UserCreateSchema, UserLoginSchema
+from app.services import ServiceError
+from app.services.auth_service import AuthService
 from app.utils.http import error, iso, success
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -26,15 +26,7 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 def _revoke_token(jti, token_type, user_id, expires_at):
     """JWT jti'ни denylist'ке кошот — raw токен сакталбайт, минималдуу маалымат."""
-    if jti and not TokenBlocklist.query.filter_by(jti=jti).first():
-        db.session.add(
-            TokenBlocklist(
-                jti=jti,
-                token_type=token_type,
-                user_id=user_id,
-                expires_at=expires_at,
-            )
-        )
+    AuthService.revoke_token(jti, token_type, user_id, expires_at)
 
 
 def _user_dict(user):
@@ -107,40 +99,16 @@ def register():
       201:
         description: Колдонуучу ийгиликтүү катталды
     """
-    data = request.get_json(silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    first_name = (data.get("first_name") or "").strip()
+    try:
+        payload = UserCreateSchema().load(request.get_json(silent=True) or {})
+    except ValidationError as exc:
+        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+    try:
+        result = AuthService.register(payload)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
 
-    if not email or not password or not first_name:
-        return error("email, password жана first_name милдеттүү талаалар", 400)
-    if len(password) < 6:
-        return error("Пароль кеминде 6 белгиден турушу керек", 400)
-
-    if User.query.filter_by(email=email).first():
-        return error("Бул email менен колдонуучу бар", 400)
-
-    user = User(
-        email=email,
-        phone=(data.get("phone") or "").strip() or None,
-        first_name=first_name,
-        last_name=(data.get("last_name") or "").strip() or None,
-        password_hash=generate_password_hash(password),
-    )
-    db.session.add(user)
-    db.session.commit()
-
-    access_token = create_access_token(identity=str(user.id))
-    refresh_token = create_refresh_token(identity=str(user.id))
-    return success(
-        {
-            "user": _user_dict(user),
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-        },
-        status=201,
-        message="Колдонуучу катталды",
-    )
+    return success({"user": result["user"], "access_token": result["access_token"], "refresh_token": result["refresh_token"]}, status=201, message="Колдонуучу катталды")
 
 
 @auth_bp.post("/login")
@@ -175,34 +143,18 @@ def login():
       401:
         description: Туура эмес email же пароль
     """
-    data = request.get_json(silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
+    try:
+        payload = UserLoginSchema().load(request.get_json(silent=True) or {})
+    except ValidationError as exc:
+        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+    try:
+        result = AuthService.login(payload)
+    except ServiceError as exc:
+        current_app.logger.warning("Login failed email=%s (%s)", payload.get("email"), exc.message)
+        return error(exc.message, exc.status_code, exc.code, exc.details)
 
-    if not email or not password:
-        return error("email жана password милдеттүү", 400)
-
-    user = User.query.filter_by(email=email).first()
-    if not user or not check_password_hash(user.password_hash, password):
-        current_app.logger.warning("Login failed email=%s (bad credentials)", email)
-        return error("Email же пароль туура эмес", 401)
-    # Деактивацияланган аккаунт кире албайт (колдонуучуну санашоо кылбаш үчүн
-    # ошол эле жалпы 401-сообщение кайтарылат).
-    if not user.is_active:
-        current_app.logger.warning("Login blocked for inactive user id=%s", user.id)
-        return error("Email же пароль туура эмес", 401)
-
-    access_token = create_access_token(identity=str(user.id))
-    refresh_token = create_refresh_token(identity=str(user.id))
-    current_app.logger.info("Login success user_id=%s", user.id)
-    return success(
-        {
-            "user": _user_dict(user),
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-        },
-        message="Кирүү ийгиликтүү",
-    )
+    current_app.logger.info("Login success user_id=%s", result["user"]["id"])
+    return success({"user": result["user"], "access_token": result["access_token"], "refresh_token": result["refresh_token"]}, message="Кирүү ийгиликтүү")
 
 
 @auth_bp.post("/refresh")
@@ -224,10 +176,11 @@ def refresh():
     """
     user_id = get_jwt_identity()
     user = db.session.get(User, int(user_id)) if user_id else None
-    if user is None or not user.is_active:
-        return error("Аккаунт өчүрүлгөн же табылган жок", 401)
-    new_access_token = create_access_token(identity=str(user.id))
-    return success({"access_token": new_access_token}, message="Токен жаңыланды")
+    try:
+        result = AuthService.refresh_access(user)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
+    return success(result, message="Токен жаңыланды")
 
 
 @auth_bp.get("/me")

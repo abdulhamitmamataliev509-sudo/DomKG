@@ -5,7 +5,8 @@ from app import create_app
 
 
 def main() -> int:
-    app = create_app("test")
+    # Swagger Enabled болгону үчүн dev config колдонулат (test config'те өчүк)
+    app = create_app("dev")
     client = app.test_client()
 
     # 1) apidocs UI HTML
@@ -35,6 +36,8 @@ def main() -> int:
         "/api/auth/ping",
         "/api/auth/register",
         "/api/auth/login",
+        "/api/auth/refresh",
+        "/api/auth/logout",
         "/api/auth/me",
         "/api/users",
         "/api/users/{user_id}",
