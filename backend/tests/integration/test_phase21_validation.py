@@ -59,6 +59,33 @@ def test_property_create_requires_valid_payload(client, auth_client, seeded_look
     assert data["owner_id"]
 
 
+def test_property_update_allows_owner_patch(client, auth_client, seeded_lookup):
+    create = client.post(
+        "/api/properties",
+        json={
+            "title": "Original apartment",
+            "price": 90000,
+            "deal_type": "rent",
+            "property_type": "apartment",
+            "category_id": seeded_lookup["category_id"],
+            "city_id": seeded_lookup["city_id"],
+        },
+        headers={"Authorization": f"Bearer {auth_client}"},
+    )
+    property_id = create.get_json()["data"]["id"]
+
+    resp = client.patch(
+        f"/api/properties/{property_id}",
+        json={"title": "Updated apartment", "price": 95000},
+        headers={"Authorization": f"Bearer {auth_client}"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["data"]["title"] == "Updated apartment"
+    assert body["data"]["price"] == "95000.00"
+
+
 def test_property_create_rejects_missing_required_fields(client, auth_client, seeded_lookup):
     resp = client.post(
         "/api/properties",

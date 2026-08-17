@@ -271,8 +271,10 @@ def create_property():
       500:
         description: Сервер катасы
     """
+    payload_raw = request.get_json(silent=True) or {}
+    payload_raw.pop("owner_id", None)
     try:
-        payload = PropertyCreateSchema().load(request.get_json(silent=True) or {})
+        payload = PropertyCreateSchema().load(payload_raw)
     except ValidationError as exc:
         return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
     try:
@@ -280,3 +282,20 @@ def create_property():
     except ServiceError as exc:
         return error(exc.message, exc.status_code, exc.code, exc.details)
     return success(_property_dict(prop), status=201, message="Жарнама түзүлдү")
+
+
+@properties_bp.patch("/<int:property_id>")
+@active_jwt_required
+def update_property(property_id):
+    """Owner can update a property."""
+    payload_raw = request.get_json(silent=True) or {}
+    payload_raw.pop("owner_id", None)
+    try:
+        payload = PropertyUpdateSchema().load(payload_raw)
+    except ValidationError as exc:
+        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+    try:
+        prop = PropertyService.update_property(g.current_user, property_id, payload)
+    except ServiceError as exc:
+        return error(exc.message, exc.status_code, exc.code, exc.details)
+    return success(_property_dict(prop), message="Жарнама жаңыртылды")

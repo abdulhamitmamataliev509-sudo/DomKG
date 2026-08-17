@@ -102,7 +102,7 @@ def register():
     try:
         payload = UserCreateSchema().load(request.get_json(silent=True) or {})
     except ValidationError as exc:
-        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+        return error("Validation failed", 400, "BAD_REQUEST", exc.messages)
     try:
         result = AuthService.register(payload)
     except ServiceError as exc:
@@ -146,7 +146,7 @@ def login():
     try:
         payload = UserLoginSchema().load(request.get_json(silent=True) or {})
     except ValidationError as exc:
-        return error("Validation failed", 400, "VALIDATION_ERROR", exc.messages)
+        return error("Validation failed", 400, "BAD_REQUEST", exc.messages)
     try:
         result = AuthService.login(payload)
     except ServiceError as exc:
