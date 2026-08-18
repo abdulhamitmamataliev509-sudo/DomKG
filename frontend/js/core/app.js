@@ -1,4 +1,5 @@
 import { api } from '../api/api.js';
+import { ui } from '../components/ui.js';
 import { authState } from './state.js';
 import { getCurrentQuery, initRouter, navigateTo, registerRoute } from './router.js';
 
@@ -945,16 +946,45 @@ async function renderAdminPage() {
         <div style="margin-top:2rem;">
           <h2>Reports</h2>
           ${reports.length ? `<div class="grid-3">${reports.map((report) => `
-            <article class="card" style="padding:var(--space-5)">
+            <article class="card report-card" style="padding:var(--space-5)">
               <h3>Report #${report.id}</h3>
               <p><strong>Property:</strong> ${report.property_id}</p>
               <p><strong>Status:</strong> ${escapeHtml(report.status || 'pending')}</p>
-              <p>${escapeHtml(report.reason || 'No reason provided')}</p>
+              <p><strong>Reason:</strong> ${escapeHtml(report.reason || 'No reason provided')}</p>
+              ${report.description ? `<p>${escapeHtml(report.description)}</p>` : ''}
+              <div class="report-actions">
+                <button type="button" class="btn btn-primary" data-report-action="resolved" data-report-id="${report.id}">Resolve</button>
+                <button type="button" class="btn btn-ghost" data-report-action="dismissed" data-report-id="${report.id}">Dismiss</button>
+              </div>
             </article>
           `).join('')}</div>` : '<div class="empty-state">No reports are currently pending.</div>'}
         </div>
       </section>
     `;
+
+    document.querySelectorAll('[data-report-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const reportId = Number(button.dataset.reportId);
+        const status = button.dataset.reportAction;
+        const note = window.prompt(`Optional resolution note for report #${reportId} (${status})`, '');
+
+        if (note === null) {
+          return;
+        }
+
+        try {
+          await api.patch(`/api/admin/reports/${reportId}`, {
+            status,
+            resolution_note: note && note.trim() ? note.trim() : null,
+          });
+
+          ui.toast(`Report #${reportId} marked as ${status}.`, 'success');
+          await renderAdminPage();
+        } catch (error) {
+          ui.toast(error?.message || 'Unable to update report status.', 'error');
+        }
+      });
+    });
   } catch (error) {
     renderError(error.message || 'Unable to load the admin dashboard.');
   }

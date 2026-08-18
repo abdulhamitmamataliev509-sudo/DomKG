@@ -24,6 +24,10 @@
     grid-template-columns: 1fr;
   }
 
+  .report-actions {
+    flex-direction: column;
+  }
+
   .header-actions .btn:not(.mobile-only) {
     display: none;
   }
